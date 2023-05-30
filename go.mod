@@ -1,4 +1,4 @@
-module go-yt-zip-share
+module go-feed-rss
 
 go 1.19
 

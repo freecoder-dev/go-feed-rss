@@ -1,150 +1,72 @@
 package main
 
 import (
-	"archive/zip"
-	"encoding/json"
+	"encoding/xml"
 	"fmt"
-	"html/template"
 	"io"
-	"log"
 	"net/http"
 	"os"
-	"strconv"
-	"strings"
-	"time"
 )
 
-const (
-	baseURL       = "http://localhost:8080" // Replace with your base URL
-	uploadsDir    = "./uploads/"
-	maxUploadSize = 10 * 1024 * 1024 // 10MB
-)
+// Feed represents an RSS feed item
+type Feed struct {
+	XMLName xml.Name `xml:"rss"`
+	Channel Channel  `xml:"channel"`
+}
 
-type UploadResponse struct {
-	Message string `json:"message"`
-	FileURL string `json:"file_url"`
+// Channel represents the channel of an RSS feed
+type Channel struct {
+	Title       string `xml:"title"`
+	Description string `xml:"description"`
+	Items       []Item `xml:"item"`
+}
+
+// Item represents an item in an RSS feed
+type Item struct {
+	Title       string `xml:"title"`
+	Description string `xml:"description"`
+	Link        string `xml:"link"`
 }
 
 func main() {
-	http.HandleFunc("/", index)
-	http.HandleFunc("/upload", uploadFile)
-	http.HandleFunc("/file/", serveFile)
-	log.Fatal(http.ListenAndServe(":8080", nil))
-}
+	// Example RSS feed URL
+	url := "https://freecoder.dev/feed/"
 
-func index(w http.ResponseWriter, r *http.Request) {
-	tmpl := template.Must(template.ParseFiles("./../src/web/index.html"))
-	tmpl.Execute(w, nil)
-}
-
-func uploadFile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Limit the size of the uploaded file
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-
-	err := r.ParseMultipartForm(maxUploadSize)
+	// Fetch the RSS feed
+	resp, err := http.Get(url)
 	if err != nil {
-		http.Error(w, "File too large", http.StatusBadRequest)
-		return
+		fmt.Println("Failed to fetch RSS feed:", err)
+		os.Exit(1)
 	}
+	defer resp.Body.Close()
 
-	file, handler, err := r.FormFile("file")
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		http.Error(w, "Failed to retrieve file", http.StatusBadRequest)
-		return
+		fmt.Println("Failed to read response body:", err)
+		os.Exit(1)
 	}
-	defer file.Close()
 
-	// Generate a unique file name
-	fileName := strconv.FormatInt(time.Now().UnixNano(), 10)
-
-	// Create the uploads directory if it doesn't exist
-	err = os.MkdirAll(uploadsDir, os.ModePerm)
+	// Parse the RSS feed
+	var feed Feed
+	err = xml.Unmarshal(body, &feed)
 	if err != nil {
-		http.Error(w, "Failed to create upload directory", http.StatusInternalServerError)
-		return
+		fmt.Println("Failed to parse RSS feed:", err)
+		os.Exit(1)
 	}
 
-	// Create the new zip file in the uploads directory
-	zipFilePath := uploadsDir + fileName + ".zip"
-	zipFile, err := os.Create(zipFilePath)
-	if err != nil {
-		http.Error(w, "Failed to create zip file", http.StatusInternalServerError)
-		return
-	}
-	defer zipFile.Close()
+	// Print the feed title and description
+	fmt.Println("************************************")
+	fmt.Println("Channel Title:", feed.Channel.Title)
+	fmt.Println("Description:", feed.Channel.Description)
+	fmt.Println("************************************")
+	fmt.Println()
 
-	// Create a zip writer
-	zw := zip.NewWriter(zipFile)
-
-	// Create a new file in the zip writer
-	zf, err := zw.Create(handler.Filename)
-	if err != nil {
-		http.Error(w, "Failed to create file in zip", http.StatusInternalServerError)
-		return
-	}
-
-	// Copy the uploaded file content to the zip entry
-	_, err = io.Copy(zf, file)
-	if err != nil {
-		http.Error(w, "Failed to save file in zip", http.StatusInternalServerError)
-		return
-	}
-
-	// Close the zip writer
-	err = zw.Close()
-	if err != nil {
-		http.Error(w, "Failed to close zip writer", http.StatusInternalServerError)
-		return
-	}
-
-	// Generate a shareable link
-	fileURL := fmt.Sprintf("%s/file/%s.zip", baseURL, fileName)
-
-	// Create the JSON response
-	response := UploadResponse{
-		Message: "File uploaded successfully!",
-		FileURL: fileURL,
-	}
-
-	// Convert the response to JSON
-	jsonResponse, err := json.Marshal(response)
-	if err != nil {
-		http.Error(w, "Failed to generate JSON response", http.StatusInternalServerError)
-		return
-	}
-
-	// Set the response headers
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	// Send the JSON response
-	w.Write(jsonResponse)
-}
-
-func serveFile(w http.ResponseWriter, r *http.Request) {
-	fileName := strings.TrimPrefix(r.URL.Path, "/file/")
-
-	// Retrieve the file from the uploads directory
-	filePath := uploadsDir + fileName
-	file, err := os.Open(filePath)
-	if err != nil {
-		http.Error(w, "File not found", http.StatusNotFound)
-		return
-	}
-	defer file.Close()
-
-	// Set the appropriate Content-Type header
-	w.Header().Set("Content-Type", "application/zip")
-
-	// Copy the file data to the response
-	_, err = io.Copy(w, file)
-	if err != nil {
-		http.Error(w, "Failed to serve file", http.StatusInternalServerError)
-		return
+	// Print the latest items
+	for _, item := range feed.Channel.Items {
+		fmt.Println("Title:", item.Title)
+		fmt.Println("Description:", item.Description)
+		fmt.Println("Link:", item.Link)
+		fmt.Println("--------")
 	}
 }
